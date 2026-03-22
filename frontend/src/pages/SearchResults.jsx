@@ -53,7 +53,7 @@ export default function SearchResults() {
           {query && (
             <div className="flex items-center gap-2 mt-1.5">
               <p className="text-sm text-gray-500">
-                Results for "<span className="font-semibold text-gray-700">{query}</span>"
+                Results for &ldquo;<span className="font-semibold text-gray-700">{query}</span>&rdquo;
               </p>
               <button
                 onClick={() => { setSearchParams({}); setResults([]); setSearched(false); }}
@@ -78,7 +78,7 @@ export default function SearchResults() {
           </div>
           <h3 className="text-lg font-bold text-gray-800 mb-2">No results found</h3>
           <p className="text-sm text-gray-500 max-w-sm mx-auto">
-            No papers match "<span className="font-semibold">{query}</span>". Try a different search term.
+            No papers match &ldquo;<span className="font-semibold">{query}</span>&rdquo;. Try a different search term.
           </p>
         </div>
       ) : results.length > 0 ? (

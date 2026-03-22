@@ -3,7 +3,6 @@
 import re
 from typing import Optional
 from .models import ValidationResult
-from .exceptions import ValidationError
 
 
 class PaperValidator:
