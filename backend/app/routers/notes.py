@@ -3,17 +3,22 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from ..database import get_db
-from ..models import Note, Paper
+from ..models import Note, Paper, User
 from ..schemas import NoteCreate, NoteUpdate, NoteResponse
+from ..auth import get_current_user
 
 router = APIRouter()
 
 
 @router.get("/papers/{paper_id}/notes", response_model=list[NoteResponse])
-def get_notes(paper_id: int, db: Session = Depends(get_db)):
+def get_notes(
+    paper_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     """Get all notes for a specific paper."""
     paper = db.query(Paper).filter(Paper.id == paper_id).first()
-    if not paper:
+    if not paper or paper.user_id != current_user.id:
         raise HTTPException(status_code=404, detail="Paper not found")
     notes = (
         db.query(Note)
@@ -25,10 +30,15 @@ def get_notes(paper_id: int, db: Session = Depends(get_db)):
 
 
 @router.post("/papers/{paper_id}/notes", response_model=NoteResponse, status_code=201)
-def create_note(paper_id: int, note_data: NoteCreate, db: Session = Depends(get_db)):
+def create_note(
+    paper_id: int,
+    note_data: NoteCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     """Add a new note to a paper."""
     paper = db.query(Paper).filter(Paper.id == paper_id).first()
-    if not paper:
+    if not paper or paper.user_id != current_user.id:
         raise HTTPException(status_code=404, detail="Paper not found")
 
     note = Note(paper_id=paper_id, content=note_data.content)
@@ -39,10 +49,18 @@ def create_note(paper_id: int, note_data: NoteCreate, db: Session = Depends(get_
 
 
 @router.put("/notes/{note_id}", response_model=NoteResponse)
-def update_note(note_id: int, note_data: NoteUpdate, db: Session = Depends(get_db)):
+def update_note(
+    note_id: int,
+    note_data: NoteUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     """Update an existing note."""
     note = db.query(Note).filter(Note.id == note_id).first()
     if not note:
+        raise HTTPException(status_code=404, detail="Note not found")
+    paper = db.query(Paper).filter(Paper.id == note.paper_id).first()
+    if not paper or paper.user_id != current_user.id:
         raise HTTPException(status_code=404, detail="Note not found")
 
     note.content = note_data.content
@@ -52,10 +70,17 @@ def update_note(note_id: int, note_data: NoteUpdate, db: Session = Depends(get_d
 
 
 @router.delete("/notes/{note_id}", status_code=204)
-def delete_note(note_id: int, db: Session = Depends(get_db)):
+def delete_note(
+    note_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     """Delete a note."""
     note = db.query(Note).filter(Note.id == note_id).first()
     if not note:
+        raise HTTPException(status_code=404, detail="Note not found")
+    paper = db.query(Paper).filter(Paper.id == note.paper_id).first()
+    if not paper or paper.user_id != current_user.id:
         raise HTTPException(status_code=404, detail="Note not found")
 
     db.delete(note)

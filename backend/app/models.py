@@ -1,9 +1,25 @@
-"""SQLAlchemy ORM models for Paper and Note entities."""
+"""SQLAlchemy ORM models for User, Paper, and Note entities."""
 
 from sqlalchemy import Column, Integer, String, Text, DateTime, ForeignKey
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from .database import Base
+
+
+class User(Base):
+    """Represents a registered user."""
+
+    __tablename__ = "users"
+
+    id = Column(Integer, primary_key=True, index=True)
+    email = Column(String(255), unique=True, nullable=False, index=True)
+    full_name = Column(String(255), nullable=False)
+    hashed_password = Column(String(255), nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    papers = relationship(
+        "Paper", back_populates="owner", cascade="all, delete-orphan"
+    )
 
 
 class Paper(Base):
@@ -21,11 +37,15 @@ class Paper(Base):
     reading_status = Column(String(20), default="not_started")
     pdf_s3_key = Column(String(500), nullable=True)
     pdf_filename = Column(String(255), nullable=True)
+    user_id = Column(
+        Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=True
+    )
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
 
+    owner = relationship("User", back_populates="papers")
     notes = relationship("Note", back_populates="paper", cascade="all, delete-orphan")
 
 

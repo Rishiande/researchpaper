@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Q
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 from ..database import get_db
+from ..models import User
 from ..schemas import (
     PaperCreate,
     PaperUpdate,
@@ -16,6 +17,7 @@ from ..schemas import (
 )
 from ..services import paper_service, doi_service
 from ..services.storage_service import storage_service
+from ..auth import get_current_user
 
 router = APIRouter()
 
@@ -26,28 +28,42 @@ def get_papers(
     limit: int = Query(50, ge=1, le=100),
     status: Optional[str] = None,
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
-    """List all papers with optional status filter and pagination."""
-    return paper_service.get_all_papers(db, skip=skip, limit=limit, status=status)
+    """List all papers for the authenticated user."""
+    return paper_service.get_all_papers(
+        db, skip=skip, limit=limit, status=status, user_id=current_user.id,
+    )
 
 
 @router.get("/papers/search", response_model=list[PaperResponse])
-def search_papers(q: str = Query(..., min_length=1), db: Session = Depends(get_db)):
+def search_papers(
+    q: str = Query(..., min_length=1),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     """Search papers by keyword, author, or title."""
-    return paper_service.search_papers(db, q)
+    return paper_service.search_papers(db, q, user_id=current_user.id)
 
 
 @router.get("/papers/stats")
-def get_stats(db: Session = Depends(get_db)):
+def get_stats(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     """Get paper counts by reading status."""
-    return paper_service.get_paper_stats(db)
+    return paper_service.get_paper_stats(db, user_id=current_user.id)
 
 
 @router.get("/papers/{paper_id}", response_model=PaperResponse)
-def get_paper(paper_id: int, db: Session = Depends(get_db)):
+def get_paper(
+    paper_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     """Get a single paper by ID."""
     paper = paper_service.get_paper(db, paper_id)
-    if not paper:
+    if not paper or paper.user_id != current_user.id:
         raise HTTPException(status_code=404, detail="Paper not found")
     return paper
 
@@ -63,6 +79,7 @@ def create_paper(
     reading_status: str = Form("not_started"),
     file: Optional[UploadFile] = File(None),
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """Create a new paper with optional PDF upload."""
     # Validate using custom library
@@ -96,7 +113,9 @@ def create_paper(
         reading_status=reading_status,
     )
 
-    return paper_service.create_paper(db, paper_data, pdf_key, pdf_filename)
+    return paper_service.create_paper(
+        db, paper_data, pdf_key, pdf_filename, user_id=current_user.id,
+    )
 
 
 @router.put("/papers/{paper_id}", response_model=PaperResponse)
@@ -111,10 +130,11 @@ def update_paper(
     reading_status: Optional[str] = Form(None),
     file: Optional[UploadFile] = File(None),
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """Update an existing paper with optional PDF replacement."""
     existing = paper_service.get_paper(db, paper_id)
-    if not existing:
+    if not existing or existing.user_id != current_user.id:
         raise HTTPException(status_code=404, detail="Paper not found")
 
     # Handle file upload / replacement
@@ -141,20 +161,28 @@ def update_paper(
 
 @router.patch("/papers/{paper_id}/status", response_model=PaperResponse)
 def update_reading_status(
-    paper_id: int, status_data: StatusUpdate, db: Session = Depends(get_db)
+    paper_id: int,
+    status_data: StatusUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """Update only the reading status of a paper."""
-    paper = paper_service.update_status(db, paper_id, status_data.reading_status)
-    if not paper:
+    paper = paper_service.get_paper(db, paper_id)
+    if not paper or paper.user_id != current_user.id:
         raise HTTPException(status_code=404, detail="Paper not found")
+    paper = paper_service.update_status(db, paper_id, status_data.reading_status)
     return paper
 
 
 @router.delete("/papers/{paper_id}", status_code=204)
-def delete_paper(paper_id: int, db: Session = Depends(get_db)):
+def delete_paper(
+    paper_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     """Delete a paper, its PDF file, and all associated notes."""
     paper = paper_service.get_paper(db, paper_id)
-    if not paper:
+    if not paper or paper.user_id != current_user.id:
         raise HTTPException(status_code=404, detail="Paper not found")
 
     if paper.pdf_s3_key:
@@ -179,10 +207,11 @@ def get_citation(
     paper_id: int,
     format: str = Query("apa", pattern="^(apa|ieee|bibtex)$"),
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """Generate a citation for a paper in APA, IEEE, or BibTeX format."""
     paper = paper_service.get_paper(db, paper_id)
-    if not paper:
+    if not paper or paper.user_id != current_user.id:
         raise HTTPException(status_code=404, detail="Paper not found")
 
     paper_dict = {
@@ -197,10 +226,14 @@ def get_citation(
 
 
 @router.get("/papers/{paper_id}/download")
-def download_paper(paper_id: int, db: Session = Depends(get_db)):
+def download_paper(
+    paper_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     """Download the PDF file attached to a paper."""
     paper = paper_service.get_paper(db, paper_id)
-    if not paper:
+    if not paper or paper.user_id != current_user.id:
         raise HTTPException(status_code=404, detail="Paper not found")
 
     if not paper.pdf_s3_key:

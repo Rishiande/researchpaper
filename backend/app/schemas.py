@@ -1,8 +1,37 @@
 """Pydantic schemas for request validation and response serialization."""
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, EmailStr
 from typing import Optional
 from datetime import datetime
+
+
+# ── Auth Schemas ───────────────────────────────────────────
+
+class UserCreate(BaseModel):
+    email: EmailStr
+    full_name: str = Field(..., min_length=1, max_length=255)
+    password: str = Field(..., min_length=6)
+
+
+class UserLogin(BaseModel):
+    email: EmailStr
+    password: str
+
+
+class UserResponse(BaseModel):
+    id: int
+    email: str
+    full_name: str
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class Token(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+    user: UserResponse
 
 
 # ── Paper Schemas ──────────────────────────────────────────

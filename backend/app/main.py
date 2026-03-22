@@ -7,7 +7,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from .config import settings
 from .database import engine, Base
-from .routers import papers, notes
+from .routers import papers, notes, auth
 
 # Configure logging
 logging.basicConfig(
@@ -23,6 +23,19 @@ async def lifespan(app: FastAPI):
     # Startup: create tables and upload directory
     logger.info("Starting Research Paper Organizer API...")
     Base.metadata.create_all(bind=engine)
+
+    # Auto-migrate: add user_id column to papers if missing
+    from sqlalchemy import text, inspect
+    inspector = inspect(engine)
+    paper_columns = [c["name"] for c in inspector.get_columns("papers")]
+    if "user_id" not in paper_columns:
+        with engine.begin() as conn:
+            conn.execute(text(
+                "ALTER TABLE papers ADD COLUMN user_id INTEGER "
+                "REFERENCES users(id) ON DELETE CASCADE"
+            ))
+        logger.info("Migrated: added user_id column to papers table.")
+
     os.makedirs(settings.UPLOAD_DIR, exist_ok=True)
     logger.info("Database tables created / verified.")
     yield
@@ -47,6 +60,7 @@ app.add_middleware(
 )
 
 # Register routers
+app.include_router(auth.router, prefix="/api", tags=["Auth"])
 app.include_router(papers.router, prefix="/api", tags=["Papers"])
 app.include_router(notes.router, prefix="/api", tags=["Notes"])
 

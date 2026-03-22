@@ -8,10 +8,13 @@ from ..schemas import PaperCreate, PaperUpdate
 
 
 def get_all_papers(
-    db: Session, skip: int = 0, limit: int = 50, status: Optional[str] = None
+    db: Session, skip: int = 0, limit: int = 50,
+    status: Optional[str] = None, user_id: Optional[int] = None,
 ) -> List[Paper]:
     """Retrieve all papers with optional pagination and status filter."""
     query = db.query(Paper)
+    if user_id is not None:
+        query = query.filter(Paper.user_id == user_id)
     if status:
         query = query.filter(Paper.reading_status == status)
     return query.order_by(Paper.created_at.desc()).offset(skip).limit(limit).all()
@@ -27,6 +30,7 @@ def create_paper(
     paper_data: PaperCreate,
     pdf_key: str = None,
     pdf_filename: str = None,
+    user_id: int = None,
 ) -> Paper:
     """Create a new paper record."""
     paper = Paper(
@@ -39,6 +43,7 @@ def create_paper(
         reading_status=paper_data.reading_status,
         pdf_s3_key=pdf_key,
         pdf_filename=pdf_filename,
+        user_id=user_id,
     )
     db.add(paper)
     db.commit()
@@ -93,12 +98,16 @@ def delete_paper(db: Session, paper_id: int) -> Optional[Paper]:
     return paper
 
 
-def search_papers(db: Session, query: str) -> List[Paper]:
+def search_papers(
+    db: Session, query: str, user_id: Optional[int] = None
+) -> List[Paper]:
     """Search papers by title, authors, or keywords (case-insensitive)."""
     search_term = f"%{query}%"
+    q = db.query(Paper)
+    if user_id is not None:
+        q = q.filter(Paper.user_id == user_id)
     return (
-        db.query(Paper)
-        .filter(
+        q.filter(
             or_(
                 Paper.title.ilike(search_term),
                 Paper.authors.ilike(search_term),
@@ -110,14 +119,17 @@ def search_papers(db: Session, query: str) -> List[Paper]:
     )
 
 
-def get_paper_stats(db: Session) -> dict:
+def get_paper_stats(db: Session, user_id: Optional[int] = None) -> dict:
     """Get paper count statistics by reading status."""
-    total = db.query(Paper).count()
+    q = db.query(Paper)
+    if user_id is not None:
+        q = q.filter(Paper.user_id == user_id)
+    total = q.count()
     not_started = (
-        db.query(Paper).filter(Paper.reading_status == "not_started").count()
+        q.filter(Paper.reading_status == "not_started").count()
     )
-    reading = db.query(Paper).filter(Paper.reading_status == "reading").count()
-    completed = db.query(Paper).filter(Paper.reading_status == "completed").count()
+    reading = q.filter(Paper.reading_status == "reading").count()
+    completed = q.filter(Paper.reading_status == "completed").count()
     return {
         "total": total,
         "not_started": not_started,
