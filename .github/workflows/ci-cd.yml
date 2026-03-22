@@ -3,7 +3,7 @@
 # ============================================================
 # This pipeline automates the full software lifecycle:
 #   CI: Lint → Static Analysis → Security Scan → Test → Build
-#   CD: Docker Build → Push to ECR → Deploy to EC2
+#   CD: Docker Build Verify → Deploy to EC2 via SSH
 # ============================================================
 
 name: CI/CD Pipeline
@@ -219,7 +219,7 @@ jobs:
     name: "CD · Deploy to AWS EC2"
     runs-on: ubuntu-latest
     needs: [docker-build]
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push' && secrets.EC2_SSH_KEY != ''
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     steps:
       - name: Deploy to EC2 via SSH
         uses: appleboy/ssh-action@v1
@@ -227,21 +227,37 @@ jobs:
           host: ${{ secrets.EC2_HOST }}
           username: ec2-user
           key: ${{ secrets.EC2_SSH_KEY }}
-          command_timeout: 15m
+          command_timeout: 20m
           script: |
+            set -e
+            echo "=== Starting deployment ==="
+
             cd ~/researchpaper
 
-            # Pull latest code
+            # Pull latest code from GitHub
+            echo "=== Pulling latest code ==="
             git pull origin main
 
-            # Rebuild Docker images
+            # Stop existing containers
+            echo "=== Stopping existing containers ==="
+            docker-compose -f docker-compose.prod.yml down || true
+
+            # Rebuild Docker images on EC2
+            echo "=== Building backend image ==="
             DOCKER_BUILDKIT=0 docker build -t researchpaper-backend -f Dockerfile.backend .
+
+            echo "=== Building frontend image ==="
             DOCKER_BUILDKIT=0 docker build -t researchpaper-frontend -f Dockerfile.frontend .
 
-            # Restart services
-            docker-compose -f docker-compose.prod.yml up -d --remove-orphans
+            # Start services
+            echo "=== Starting services ==="
+            docker-compose -f docker-compose.prod.yml up -d
+
+            # Verify containers are running
+            echo "=== Container status ==="
+            docker ps
 
             # Clean up old images
             docker image prune -f
 
-            echo "Deployment completed successfully"
+            echo "=== Deployment completed successfully ==="

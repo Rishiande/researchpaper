@@ -29,6 +29,10 @@ Thumbs.db
 uploads/
 *.pdf
 
+# Secrets / Keys
+*.pem
+*.key
+
 # Coverage
 htmlcov/
 .coverage

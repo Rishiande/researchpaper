@@ -1,0 +1,11 @@
+.git
+.github
+.flake8
+.gitignore
+.dockerignore
+*.md
+*.pem
+__pycache__
+*.pyc
+node_modules
+frontend/node_modules
