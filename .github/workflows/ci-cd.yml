@@ -191,12 +191,12 @@ jobs:
           path: frontend/dist/
 
   # ──────────────────────────────────────────────────────────
-  # STAGE 7: Build & Push Docker Images
-  # Purpose: Containerise both services and push to registry
+  # STAGE 7: Verify Docker Builds
+  # Purpose: Ensure Docker images build successfully
   # Runs only on main branch pushes (not PRs)
   # ──────────────────────────────────────────────────────────
   docker-build:
-    name: "CD · Docker Build & Push"
+    name: "CD · Docker Build Verify"
     runs-on: ubuntu-latest
     needs: [test-python, build-frontend, security-bandit, dependency-scan]
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
@@ -204,56 +204,44 @@ jobs:
       - name: Checkout source code
         uses: actions/checkout@v4
 
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ secrets.AWS_REGION }}
+      - name: Build backend Docker image
+        run: docker build -f Dockerfile.backend -t researchpaper-backend:latest .
 
-      - name: Login to Amazon ECR
-        id: login-ecr
-        uses: aws-actions/amazon-ecr-login@v2
-
-      - name: Build and push backend Docker image
-        run: |
-          docker build -f Dockerfile.backend -t ${{ steps.login-ecr.outputs.registry }}/researchpaper-backend:latest .
-          docker push ${{ steps.login-ecr.outputs.registry }}/researchpaper-backend:latest
-
-      - name: Build and push frontend Docker image
-        run: |
-          docker build -f Dockerfile.frontend -t ${{ steps.login-ecr.outputs.registry }}/researchpaper-frontend:latest .
-          docker push ${{ steps.login-ecr.outputs.registry }}/researchpaper-frontend:latest
+      - name: Build frontend Docker image
+        run: docker build -f Dockerfile.frontend -t researchpaper-frontend:latest .
 
   # ──────────────────────────────────────────────────────────
   # STAGE 8: Deploy to AWS EC2
-  # Purpose: Pull latest images and restart services on EC2
+  # Purpose: SSH into EC2, pull latest code, rebuild and restart
+  # Requires secrets: EC2_SSH_KEY, EC2_HOST
   # ──────────────────────────────────────────────────────────
   deploy:
     name: "CD · Deploy to AWS EC2"
     runs-on: ubuntu-latest
     needs: [docker-build]
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push' && secrets.EC2_SSH_KEY != ''
     steps:
       - name: Deploy to EC2 via SSH
         uses: appleboy/ssh-action@v1
         with:
           host: ${{ secrets.EC2_HOST }}
-          username: ${{ secrets.EC2_USER }}
+          username: ec2-user
           key: ${{ secrets.EC2_SSH_KEY }}
+          command_timeout: 15m
           script: |
-            cd /home/${{ secrets.EC2_USER }}/research-paper-organizer
-            
-            # Login to ECR
-            aws ecr get-login-password --region ${{ secrets.AWS_REGION }} | docker login --username AWS --password-stdin ${{ secrets.ECR_REGISTRY }}
-            
-            # Pull latest images
-            docker compose pull
-            
-            # Restart services with zero-downtime
-            docker compose up -d --remove-orphans
-            
+            cd ~/researchpaper
+
+            # Pull latest code
+            git pull origin main
+
+            # Rebuild Docker images
+            DOCKER_BUILDKIT=0 docker build -t researchpaper-backend -f Dockerfile.backend .
+            DOCKER_BUILDKIT=0 docker build -t researchpaper-frontend -f Dockerfile.frontend .
+
+            # Restart services
+            docker-compose -f docker-compose.prod.yml up -d --remove-orphans
+
             # Clean up old images
             docker image prune -f
-            
+
             echo "Deployment completed successfully"
