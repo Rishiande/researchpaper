@@ -1,0 +1,69 @@
+# ============================================================
+# Manual Build & Deploy Workflow
+# ============================================================
+# Click "Run workflow" in GitHub Actions to build and deploy
+# the latest code to the production EC2 server.
+# ============================================================
+
+name: Build & Deploy
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build-and-deploy:
+    name: "Build & Deploy to Production"
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout source code
+        uses: actions/checkout@v4
+
+      - name: Verify Docker builds
+        run: |
+          echo "=== Building backend Docker image ==="
+          docker build -f Dockerfile.backend -t researchpaper-backend:latest .
+          echo "=== Building frontend Docker image ==="
+          docker build -f Dockerfile.frontend -t researchpaper-frontend:latest .
+          echo "=== Docker builds verified ==="
+
+      - name: Deploy to EC2 via SSH
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ec2-user
+          key: ${{ secrets.EC2_SSH_KEY }}
+          command_timeout: 20m
+          script: |
+            set -e
+            echo "=== Starting deployment ==="
+
+            cd ~/researchpaper
+
+            # Pull latest code from GitHub
+            echo "=== Pulling latest code ==="
+            git fetch origin main
+            git reset --hard origin/main
+
+            # Stop existing containers
+            echo "=== Stopping containers ==="
+            docker-compose -f docker-compose.prod.yml down || true
+
+            # Rebuild Docker images on EC2
+            echo "=== Building backend image ==="
+            DOCKER_BUILDKIT=0 docker build -t researchpaper-backend -f Dockerfile.backend .
+
+            echo "=== Building frontend image ==="
+            DOCKER_BUILDKIT=0 docker build -t researchpaper-frontend -f Dockerfile.frontend .
+
+            # Start services
+            echo "=== Starting services ==="
+            docker-compose -f docker-compose.prod.yml up -d
+
+            # Verify containers are running
+            echo "=== Container status ==="
+            docker ps
+
+            # Clean up old images
+            docker image prune -f
+
+            echo "=== Deployment completed successfully ==="
