@@ -113,9 +113,17 @@ def create_paper(
         reading_status=reading_status,
     )
 
-    return paper_service.create_paper(
-        db, paper_data, pdf_key, pdf_filename, user_id=current_user.id,
-    )
+    from sqlalchemy.exc import IntegrityError
+    try:
+        return paper_service.create_paper(
+            db, paper_data, pdf_key, pdf_filename, user_id=current_user.id,
+        )
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail="A paper with this DOI already exists in your library.",
+        )
 
 
 @router.put("/papers/{paper_id}", response_model=PaperResponse)

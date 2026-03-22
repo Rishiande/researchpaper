@@ -24,7 +24,7 @@ async def lifespan(app: FastAPI):
     logger.info("Starting Research Paper Organizer API...")
     Base.metadata.create_all(bind=engine)
 
-    # Auto-migrate: add user_id column to papers if missing
+    # Auto-migrate: add user_id column and fix DOI constraint
     from sqlalchemy import text, inspect
     inspector = inspect(engine)
     paper_columns = [c["name"] for c in inspector.get_columns("papers")]
@@ -35,6 +35,21 @@ async def lifespan(app: FastAPI):
                 "REFERENCES users(id) ON DELETE CASCADE"
             ))
         logger.info("Migrated: added user_id column to papers table.")
+
+    # Replace global DOI unique constraint with per-user constraint
+    existing_constraints = [
+        c["name"] for c in inspector.get_unique_constraints("papers")
+    ]
+    if "papers_doi_key" in existing_constraints:
+        with engine.begin() as conn:
+            conn.execute(text(
+                "ALTER TABLE papers DROP CONSTRAINT papers_doi_key"
+            ))
+            conn.execute(text(
+                "ALTER TABLE papers ADD CONSTRAINT uq_papers_doi_user "
+                "UNIQUE (doi, user_id)"
+            ))
+        logger.info("Migrated: DOI unique constraint now per-user.")
 
     os.makedirs(settings.UPLOAD_DIR, exist_ok=True)
     logger.info("Database tables created / verified.")

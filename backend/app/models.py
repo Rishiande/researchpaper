@@ -1,6 +1,6 @@
 """SQLAlchemy ORM models for User, Paper, and Note entities."""
 
-from sqlalchemy import Column, Integer, String, Text, DateTime, ForeignKey
+from sqlalchemy import Column, Integer, String, Text, DateTime, ForeignKey, UniqueConstraint
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from .database import Base
@@ -26,12 +26,15 @@ class Paper(Base):
     """Represents a research paper stored in the system."""
 
     __tablename__ = "papers"
+    __table_args__ = (
+        UniqueConstraint("doi", "user_id", name="uq_papers_doi_user"),
+    )
 
     id = Column(Integer, primary_key=True, index=True)
     title = Column(String(500), nullable=False)
     authors = Column(Text, nullable=False)
     publication_year = Column(Integer, nullable=True)
-    doi = Column(String(255), unique=True, nullable=True)
+    doi = Column(String(255), nullable=True)
     keywords = Column(Text, nullable=True)
     abstract = Column(Text, nullable=True)
     reading_status = Column(String(20), default="not_started")
