@@ -1,0 +1,6 @@
+# Bandit configuration for Python security analysis
+# Scans for common security issues: SQL injection, XSS, hardcoded passwords, etc.
+
+[bandit]
+exclude_dirs = ["venv", "tests", "__pycache__", "dist"]
+skips = ["B101"]

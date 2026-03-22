@@ -1,0 +1,33 @@
+# ── Build stage for the custom library ──
+FROM python:3.12-slim AS lib-builder
+WORKDIR /build
+COPY researchpaperlib/ ./researchpaperlib/
+RUN pip install --no-cache-dir ./researchpaperlib
+
+# ── Backend application ──
+FROM python:3.12-slim
+WORKDIR /app
+
+# Install system dependencies for psycopg2
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libpq-dev gcc && \
+    rm -rf /var/lib/apt/lists/*
+
+# Copy installed library from builder
+COPY --from=lib-builder /usr/local/lib/python3.12/site-packages /usr/local/lib/python3.12/site-packages
+
+# Install Python dependencies
+COPY backend/requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy application source code
+COPY backend/app ./app
+
+# Create uploads directory
+RUN mkdir -p /app/uploads
+
+# Expose port for the FastAPI application
+EXPOSE 8000
+
+# Run the application with Uvicorn ASGI server
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

@@ -1,0 +1,17 @@
+# Flake8 configuration for Python code style enforcement
+# Used in CI pipeline Stage 1 for static code analysis
+
+[flake8]
+max-line-length = 120
+exclude =
+    venv,
+    __pycache__,
+    .git,
+    dist,
+    build,
+    *.egg-info
+ignore =
+    E501,
+    W503
+statistics = true
+count = true

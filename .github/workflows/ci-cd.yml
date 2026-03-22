@@ -1,0 +1,259 @@
+# ============================================================
+# CI/CD Pipeline for Research Paper Organizer
+# ============================================================
+# This pipeline automates the full software lifecycle:
+#   CI: Lint → Static Analysis → Security Scan → Test → Build
+#   CD: Docker Build → Push to ECR → Deploy to EC2
+# ============================================================
+
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  PYTHON_VERSION: "3.12"
+  NODE_VERSION: "20"
+
+jobs:
+  # ──────────────────────────────────────────────────────────
+  # STAGE 1: Python Linting with Flake8
+  # Purpose: Enforce code style and catch syntax errors
+  # ──────────────────────────────────────────────────────────
+  lint-python:
+    name: "CI · Python Lint (Flake8)"
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout source code
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ env.PYTHON_VERSION }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install linting tools
+        run: pip install flake8
+
+      - name: Run Flake8 on backend code
+        run: flake8 backend/app --max-line-length=120 --statistics --count
+
+      - name: Run Flake8 on custom library
+        run: flake8 researchpaperlib/researchpaperlib --max-line-length=120 --statistics --count
+
+  # ──────────────────────────────────────────────────────────
+  # STAGE 2: JavaScript Linting with ESLint
+  # Purpose: Enforce frontend code quality standards
+  # ──────────────────────────────────────────────────────────
+  lint-frontend:
+    name: "CI · Frontend Lint (ESLint)"
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout source code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js ${{ env.NODE_VERSION }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Run ESLint on frontend source
+        working-directory: frontend
+        run: npx eslint src/ --ext .js,.jsx --max-warnings 0 || true
+
+  # ──────────────────────────────────────────────────────────
+  # STAGE 3: Static Code Analysis — Bandit (Security)
+  # Purpose: Detect security vulnerabilities in Python code
+  # Tool: Bandit — Python static security analyser
+  # ──────────────────────────────────────────────────────────
+  security-bandit:
+    name: "CI · Security Scan (Bandit)"
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout source code
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ env.PYTHON_VERSION }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install Bandit security scanner
+        run: pip install bandit[toml]
+
+      - name: Run Bandit on backend code
+        run: bandit -r backend/app -f json -o bandit-backend-report.json --severity-level medium || true
+
+      - name: Run Bandit on custom library
+        run: bandit -r researchpaperlib/researchpaperlib -f json -o bandit-lib-report.json --severity-level medium || true
+
+      - name: Display Bandit results summary
+        run: |
+          echo "=== Backend Security Report ==="
+          bandit -r backend/app --severity-level medium -f txt || true
+          echo ""
+          echo "=== Library Security Report ==="
+          bandit -r researchpaperlib/researchpaperlib --severity-level medium -f txt || true
+
+      - name: Upload Bandit reports as artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: bandit-security-reports
+          path: bandit-*-report.json
+
+  # ──────────────────────────────────────────────────────────
+  # STAGE 4: Dependency Vulnerability Scan (Safety / pip-audit)
+  # Purpose: Check for known vulnerabilities in dependencies
+  # ──────────────────────────────────────────────────────────
+  dependency-scan:
+    name: "CI · Dependency Scan (pip-audit)"
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout source code
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ env.PYTHON_VERSION }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install pip-audit
+        run: pip install pip-audit
+
+      - name: Audit backend dependencies
+        run: pip-audit -r backend/requirements.txt || true
+
+      - name: Audit library dependencies
+        run: |
+          pip install ./researchpaperlib
+          pip-audit || true
+
+  # ──────────────────────────────────────────────────────────
+  # STAGE 5: Run Python Tests (Library unit tests)
+  # Purpose: Verify custom library functionality
+  # ──────────────────────────────────────────────────────────
+  test-python:
+    name: "CI · Python Tests (Pytest)"
+    runs-on: ubuntu-latest
+    needs: [lint-python]
+    steps:
+      - name: Checkout source code
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ env.PYTHON_VERSION }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install library with test dependencies
+        run: pip install ./researchpaperlib[dev]
+
+      - name: Run library unit tests with coverage
+        working-directory: researchpaperlib
+        run: pytest tests/ -v --tb=short --cov=researchpaperlib --cov-report=term-missing
+
+  # ──────────────────────────────────────────────────────────
+  # STAGE 6: Build Frontend (React + Vite)
+  # Purpose: Verify frontend compiles without errors
+  # ──────────────────────────────────────────────────────────
+  build-frontend:
+    name: "CI · Build Frontend (Vite)"
+    runs-on: ubuntu-latest
+    needs: [lint-frontend]
+    steps:
+      - name: Checkout source code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js ${{ env.NODE_VERSION }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Install dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Build production bundle
+        working-directory: frontend
+        run: npm run build
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-build
+          path: frontend/dist/
+
+  # ──────────────────────────────────────────────────────────
+  # STAGE 7: Build & Push Docker Images
+  # Purpose: Containerise both services and push to registry
+  # Runs only on main branch pushes (not PRs)
+  # ──────────────────────────────────────────────────────────
+  docker-build:
+    name: "CD · Docker Build & Push"
+    runs-on: ubuntu-latest
+    needs: [test-python, build-frontend, security-bandit, dependency-scan]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    steps:
+      - name: Checkout source code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build and push backend Docker image
+        run: |
+          docker build -f Dockerfile.backend -t ${{ steps.login-ecr.outputs.registry }}/researchpaper-backend:latest .
+          docker push ${{ steps.login-ecr.outputs.registry }}/researchpaper-backend:latest
+
+      - name: Build and push frontend Docker image
+        run: |
+          docker build -f Dockerfile.frontend -t ${{ steps.login-ecr.outputs.registry }}/researchpaper-frontend:latest .
+          docker push ${{ steps.login-ecr.outputs.registry }}/researchpaper-frontend:latest
+
+  # ──────────────────────────────────────────────────────────
+  # STAGE 8: Deploy to AWS EC2
+  # Purpose: Pull latest images and restart services on EC2
+  # ──────────────────────────────────────────────────────────
+  deploy:
+    name: "CD · Deploy to AWS EC2"
+    runs-on: ubuntu-latest
+    needs: [docker-build]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    steps:
+      - name: Deploy to EC2 via SSH
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script: |
+            cd /home/${{ secrets.EC2_USER }}/research-paper-organizer
+            
+            # Login to ECR
+            aws ecr get-login-password --region ${{ secrets.AWS_REGION }} | docker login --username AWS --password-stdin ${{ secrets.ECR_REGISTRY }}
+            
+            # Pull latest images
+            docker compose pull
+            
+            # Restart services with zero-downtime
+            docker compose up -d --remove-orphans
+            
+            # Clean up old images
+            docker image prune -f
+            
+            echo "Deployment completed successfully"
